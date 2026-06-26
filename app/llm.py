@@ -1,9 +1,10 @@
 import json
 import os
-from openai import OpenAI
+import google.generativeai as genai
+from .schemas import TicketResponse
 
-# Initialize client; API key should be in environment
-client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+# Configure Gemini
+genai.configure(api_key=os.environ.get("GEMINI_API_KEY"))
 
 SYSTEM_PROMPT = """You are QueueStorm Investigator, an internal AI copilot for a digital finance
 platform's support team. You are NOT a customer-facing chatbot and you have NO
@@ -80,7 +81,6 @@ exactly — no extra commentary, no markdown, no explanation outside the JSON
 fields. Always echo the ticket_id exactly as given in the input."""
 
 def build_user_prompt(ticket: dict, candidates: list[dict]) -> str:
-    # Formatting the transaction history and candidates to JSON for the prompt
     history = ticket.get("transaction_history", [])
     history_json = json.dumps(history, indent=2)
     candidates_json = json.dumps(candidates, indent=2)
@@ -107,77 +107,23 @@ Return your structured analysis now, following the system prompt's rules
 exactly."""
     return prompt
 
-ANALYZE_TICKET_JSON_SCHEMA = {
-    "name": "ticket_analysis",
-    "strict": False,
-    "schema": {
-        "type": "object",
-        "properties": {
-            "ticket_id": {"type": "string"},
-            "relevant_transaction_id": {"type": ["string", "null"]},
-            "evidence_verdict": {
-                "type": "string",
-                "enum": ["consistent", "inconsistent", "insufficient_data"]
-            },
-            "case_type": {
-                "type": "string",
-                "enum": [
-                    "wrong_transfer", "payment_failed", "refund_request", "duplicate_payment",
-                    "merchant_settlement_delay", "agent_cash_in_issue",
-                    "phishing_or_social_engineering", "other"
-                ]
-            },
-            "severity": {
-                "type": "string",
-                "enum": ["low", "medium", "high", "critical"]
-            },
-            "department": {
-                "type": "string",
-                "enum": [
-                    "customer_support", "dispute_resolution", "payments_ops",
-                    "merchant_operations", "agent_operations", "fraud_risk"
-                ]
-            },
-            "agent_summary": {"type": "string"},
-            "recommended_next_action": {"type": "string"},
-            "customer_reply": {"type": "string"},
-            "human_review_required": {"type": "boolean"},
-            "confidence": {"type": ["number", "null"]},
-            "reason_codes": {
-                "type": ["array", "null"],
-                "items": {"type": "string"}
-            }
-        },
-        "required": [
-            "ticket_id",
-            "relevant_transaction_id",
-            "evidence_verdict",
-            "case_type",
-            "severity",
-            "department",
-            "agent_summary",
-            "recommended_next_action",
-            "customer_reply",
-            "human_review_required"
-        ],
-        "additionalProperties": False
-    }
-}
 
 def analyze_with_llm(ticket: dict, candidates: list[dict]) -> dict:
-    model_name = os.environ.get("MODEL_NAME", "gpt-4o-mini")
+    model_name = os.environ.get("MODEL_NAME", "gemini-1.5-flash")
     
-    response = client.chat.completions.create(
-        model=model_name,
-        messages=[
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": build_user_prompt(ticket, candidates)},
-        ],
-        response_format={
-            "type": "json_schema",
-            "json_schema": ANALYZE_TICKET_JSON_SCHEMA
-        },
-        timeout=20,  # leave headroom under the 30s hard limit
+    # Initialize the model with the system instruction
+    model = genai.GenerativeModel(
+        model_name=model_name,
+        system_instruction=SYSTEM_PROMPT
     )
     
-    return json.loads(response.choices[0].message.content)
+    # Call Gemini API with Structured Outputs (Pydantic Schema)
+    response = model.generate_content(
+        build_user_prompt(ticket, candidates),
+        generation_config=genai.GenerationConfig(
+            response_mime_type="application/json",
+            response_schema=TicketResponse
+        )
+    )
+    
+    return json.loads(response.text)
