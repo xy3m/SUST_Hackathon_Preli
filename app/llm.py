@@ -21,18 +21,15 @@ YOUR JOB — investigate, don't just classify:
    transaction type) against the transaction_history provided.
 2. Pick the ONE transaction_id that the complaint most plausibly refers to, or
    return null if none in the provided history is a clear match.
-3. If two or more transactions are equally plausible matches, do NOT guess.
+3. If two or more transactions are equally plausible matches (e.g., multiple transactions of the same amount and type, regardless of their status like failed vs completed), do NOT guess.
    Return relevant_transaction_id: null and evidence_verdict:
-   "insufficient_data", and explain in recommended_next_action what
-   disambiguating detail is needed from the customer.
+   "insufficient_data", but KEEP the case_type and department accurate to the complaint's intent.
 4. Set evidence_verdict to exactly one of:
-   - "consistent": the matched transaction supports the complaint's claim.
+   - "consistent": the matched transaction perfectly supports the complaint.
    - "inconsistent": the transaction history contradicts the complaint
-     (e.g. the claimed transfer doesn't exist, or the recipient is a
-     frequent/established counterparty, suggesting it wasn't actually a
-     mistake).
-   - "insufficient_data": there isn't enough information in the provided
-     history to determine the outcome.
+     (e.g. claiming a "wrong transfer" to a number that appears multiple times
+     in the history, proving it is a known/frequent contact).
+   - "insufficient_data": there isn't enough information, or there are multiple ambiguous matches.
 
 CLASSIFICATION — choose exactly one case_type:
 wrong_transfer, payment_failed, refund_request, duplicate_payment,
@@ -40,20 +37,18 @@ merchant_settlement_delay, agent_cash_in_issue,
 phishing_or_social_engineering, other.
 
 ROUTING — choose exactly one department:
-customer_support (vague/low-severity/insufficient-data cases),
+customer_support (vague/insufficient-data cases, refund_request),
 dispute_resolution (wrong_transfer, contested refunds),
 payments_ops (payment_failed, duplicate_payment),
-merchant_operations (merchant-side issues, settlement delays),
-agent_operations (agent cash-in issues),
+merchant_operations (merchant-side issues, merchant_settlement_delay),
+agent_operations (agent cash-in issues, agent_cash_in_issue),
 fraud_risk (phishing, social engineering, suspicious patterns).
 
 SEVERITY: low, medium, high, or critical based on amount at risk, urgency,
 and whether the case involves potential fraud or repeated failures.
 
-HUMAN REVIEW: set human_review_required to true for any dispute, any
-suspicious/fraud case, any high-value case, or any case with inconsistent or
-insufficient evidence. Set it to false only for low-stakes, low-ambiguity,
-informational cases.
+HUMAN REVIEW: set human_review_required to true for wrong_transfer, duplicate_payment, agent_cash_in_issue, phishing, fraud, or ANY case with inconsistent evidence or multiple ambiguous matches.
+EXCEPTIONS: If the complaint is extremely vague and provides no actionable details, set human_review_required to false and evidence_verdict to insufficient_data. For simple consistent informational cases (payment_failed, refund_request, merchant_settlement_delay) set it to false if the evidence is consistent.
 
 ABSOLUTE SAFETY RULES — apply to customer_reply AND recommended_next_action:
 - NEVER ask the customer for their PIN, OTP, password, or full card number,
@@ -78,7 +73,21 @@ should stay in clear English regardless of complaint language.
 
 OUTPUT: respond with ONLY a single JSON object matching the required schema
 exactly — no extra commentary, no markdown, no explanation outside the JSON
-fields. Always echo the ticket_id exactly as given in the input."""
+fields. Always echo the ticket_id exactly as given in the input.
+
+REQUIRED SCHEMA:
+{
+  "ticket_id": "string",
+  "relevant_transaction_id": "string or null",
+  "evidence_verdict": "consistent | inconsistent | insufficient_data",
+  "case_type": "wrong_transfer | payment_failed | refund_request | duplicate_payment | merchant_settlement_delay | agent_cash_in_issue | phishing_or_social_engineering | other",
+  "severity": "low | medium | high | critical",
+  "department": "customer_support | dispute_resolution | payments_ops | merchant_operations | agent_operations | fraud_risk",
+  "agent_summary": "string",
+  "recommended_next_action": "string",
+  "customer_reply": "string",
+  "human_review_required": boolean
+}"""
 
 def build_user_prompt(ticket: dict, candidates: list[dict]) -> str:
     history = ticket.get("transaction_history", [])
@@ -109,7 +118,7 @@ exactly."""
 
 
 def analyze_with_llm(ticket: dict, candidates: list[dict]) -> dict:
-    model_name = os.environ.get("MODEL_NAME", "gemini-1.5-flash")
+    model_name = os.environ.get("MODEL_NAME", "gemini-2.5-flash")
     
     # Initialize the model with the system instruction
     model = genai.GenerativeModel(
@@ -121,9 +130,16 @@ def analyze_with_llm(ticket: dict, candidates: list[dict]) -> dict:
     response = model.generate_content(
         build_user_prompt(ticket, candidates),
         generation_config=genai.GenerationConfig(
-            response_mime_type="application/json",
-            response_schema=TicketResponse
+            response_mime_type="application/json"
         )
     )
     
-    return json.loads(response.text)
+    raw_text = response.text.strip()
+    if raw_text.startswith("```json"):
+        raw_text = raw_text[7:]
+    elif raw_text.startswith("```"):
+        raw_text = raw_text[3:]
+    if raw_text.endswith("```"):
+        raw_text = raw_text[:-3]
+        
+    return json.loads(raw_text.strip())

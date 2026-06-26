@@ -45,15 +45,17 @@ def run_tests():
     
     success_count = 0
     
-    for case in cases:
+    for idx, case in enumerate(cases):
         print(f"Testing {case['id']}: {case['label']}")
         payload = case["input"]
         expected = case["expected_output"]
         
         try:
+            print(f"  [INPUT]: {json.dumps(payload, indent=2)}")
             resp = requests.post(API_URL, json=payload, timeout=30)
             if resp.status_code == 200:
                 result = resp.json()
+                print(f"  [OUTPUT]: {json.dumps(result, indent=2)}")
                 
                 # Diff core fields
                 diffs = []
@@ -78,6 +80,11 @@ def run_tests():
         except Exception as e:
             print(f"  [ERROR] Exception: {e}")
         print("-" * 50)
+        
+        # Avoid Gemini Free Tier rate limit (5 requests per minute for 2.5-flash)
+        if idx < len(cases) - 1:
+            print("  Sleeping for 15s to respect rate limits...")
+            time.sleep(15)
         
     print(f"Finished testing. Passed Schema & Core validation for {success_count}/{len(cases)} cases.")
     

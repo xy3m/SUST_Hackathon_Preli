@@ -1,0 +1,10 @@
+.env
+__pycache__/
+*.pyc
+venv/
+env/
+.pytest_cache/
+test_results.txt
+results_utf8.txt
+run_and_log.py
+full_test_log.txt

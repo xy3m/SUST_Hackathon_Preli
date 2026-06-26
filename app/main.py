@@ -52,6 +52,7 @@ async def analyze_ticket(payload: TicketRequest):
         raw["ticket_id"] = ticket_id
         
     except Exception as e:
+        print(f"Exception during LLM call: {e}")
         raw = safe_fallback(ticket_id)
 
     # Step 3: Enforce safety rules
