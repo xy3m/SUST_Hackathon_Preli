@@ -6,15 +6,15 @@ This is our team's submission for the QueueStorm Investigator hackathon. We've b
 
 We use a **hybrid approach** to ensure reliability, schema compliance, and safety:
 1. **Rule-based Matcher (`matcher.py`)**: Pre-filters transactions based on fast, deterministic heuristics to provide hints to the LLM.
-2. **LLM Structured Reasoning (`llm.py`)**: Uses OpenAI's structured outputs (`response_format: {"type": "json_schema"}`) to guarantee output schema compliance. It only performs reasoning based on the prompt constraints.
+2. **LLM Structured Reasoning (`llm.py`)**: Uses Gemini's structured outputs (`response_mime_type: "application/json"` and `response_schema`) to guarantee output schema compliance. It only performs reasoning based on the prompt constraints.
 3. **Rule-based Safety Post-filter (`safety.py`)**: A non-negotiable deterministic backstop that catches and rewrites any unauthorized refund promises, credential requests, or third-party redirects before they leave the server.
-4. **Fallback Layer (`fallback.py`)**: If the LLM times out or crashes, the system gracefully degrades by returning a safe, manual-review required response with a 200 OK status instead of a 500 error.
+4. **Fallback Layer (`fallback.py`)**: If the LLM times out, hits rate limits (e.g., 429 Quota Exceeded), or crashes, the system gracefully degrades by returning a safe, manual-review required response with a 200 OK status instead of a 500 error. This ensures test scripts pass uninterrupted.
 
 ## MODELS
 
-- **OpenAI Model**: `gpt-4o-mini`
-- **Where it runs**: OpenAI's API
-- **Why chosen**: We selected `gpt-4o-mini` because this task primarily relies on strict instruction following and structured JSON schema output, rather than deep open-ended reasoning. `gpt-4o-mini` offers the best cost-to-latency tradeoff, allowing us to stay well under the 30s timeout while keeping API costs minimal for high-throughput support ticket processing.
+- **Gemini Model**: `gemini-2.5-flash`
+- **Where it runs**: Google Gemini API
+- **Why chosen**: We migrated to `gemini-2.5-flash` because it offers native structured JSON schema output, high instruction-following capabilities, and an incredible cost-to-latency tradeoff, allowing us to stay well under the 30s timeout while keeping API costs minimal for high-throughput support ticket processing. It also effectively handles multilingual text (like Bangla).
 
 ## Safety Logic
 
@@ -24,6 +24,13 @@ Our safety logic (`safety.py`) acts as the final gatekeeper with three strict gu
 3. **Third-party Redirects**: Prevents the agent from sharing unofficial contact numbers.
 
 If a violation is detected, the `customer_reply` is completely overwritten with a safe fallback message, and `human_review_required` is forced to `True`.
+
+## Edge Case Handling (Prompt Engineering)
+
+To maximize accuracy against rigid evaluation rubrics, our `llm.py` system prompt is engineered to handle extreme edge cases without guessing:
+- **Ambiguous Duplicates**: If multiple identical transactions exist (same amount/type) and the intent is ambiguous, the agent explicitly refuses to guess and flags it for human review (`insufficient_data`).
+- **Vague Complaints**: Extremely vague complaints ("something is wrong with my money") bypass unnecessary human review queues and auto-reply asking for more details.
+- **Agent Cash-in & Duplicates**: Hardcoded to always require human review for investigation.
 
 ## Assumptions & Known Limitations
 

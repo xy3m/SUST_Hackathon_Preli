@@ -1,6 +1,6 @@
 # QueueStorm Investigator — 4-Hour Execution Plan (3 People)
 
-Stack: **FastAPI + Pydantic + OpenAI API**. Goal: a safe, schema-correct, reasoning-grounded `/analyze-ticket` service, deployed and documented before the clock runs out.
+Stack: **FastAPI + Pydantic + Gemini API**. Goal: a safe, schema-correct, reasoning-grounded `/analyze-ticket` service, deployed and documented before the clock runs out.
 
 ---
 
@@ -13,7 +13,7 @@ Client/Judge
 FastAPI app
    ├─ Pydantic request model   → validates input, rejects malformed JSON (400/422)
    ├─ Candidate-matcher (rules) → pre-filters transaction_history by amount/time/type
-   ├─ OpenAI call (structured) → reasons over complaint + candidates → JSON
+   ├─ Gemini call (structured) → reasons over complaint + candidates → JSON
    ├─ Safety post-filter (rules)→ scrubs OTP/PIN/refund-promise/3rd-party language
    ├─ Pydantic response model  → validates output before sending (never send broken JSON)
    └─ Fallback layer           → on LLM timeout/error, returns safe deterministic response
@@ -33,7 +33,7 @@ queuestorm/
 │   ├── main.py            # FastAPI app, /health, /analyze-ticket
 │   ├── schemas.py         # Pydantic request/response models + enums
 │   ├── matcher.py         # rule-based candidate transaction matcher
-│   ├── llm.py             # OpenAI client wrapper + prompt templates
+│   ├── llm.py             # Gemini client wrapper + prompt templates
 │   ├── safety.py          # post-processing safety filters
 │   └── fallback.py        # deterministic safe response builder
 ├── tests/
@@ -53,7 +53,7 @@ queuestorm/
 | Person | Role | Owns |
 |---|---|---|
 | **A — API Lead** | FastAPI skeleton, Pydantic schemas, endpoints, error handling, deployment, Docker | `main.py`, `schemas.py`, `Dockerfile`, hosting |
-| **B — Reasoning Lead** | Prompt engineering, OpenAI structured output, transaction matching logic | `llm.py`, `matcher.py`, prompt tuning against sample cases |
+| **B — Reasoning Lead** | Prompt engineering, Gemini structured output, transaction matching logic | `llm.py`, `matcher.py`, prompt tuning against sample cases |
 | **C — Safety/QA/Docs Lead** | Safety filters, fallback logic, test harness, README, submission checklist | `safety.py`, `fallback.py`, `tests/`, `README.md` |
 
 Everyone reads all three companion documents in the first 15 minutes — don't skip this, the rubric and safety rules drive every later decision.
@@ -65,7 +65,7 @@ Everyone reads all three companion documents in the first 15 minutes — don't s
 | Time | Block | A (API) | B (Reasoning) | C (Safety/QA/Docs) |
 |---|---|---|---|---|
 | 0:00–0:15 | Kickoff | Read docs together, agree on schema/enums, init repo | same | same |
-| 0:15–1:30 | Sprint 1 | FastAPI skeleton, Pydantic models, `/health`, error handling | OpenAI wrapper, system+user prompt v1, structured-output schema | Safety filter module, test harness skeleton, README outline |
+| 0:15–1:30 | Sprint 1 | FastAPI skeleton, Pydantic models, `/health`, error handling | Gemini wrapper, system+user prompt v1, structured-output schema | Safety filter module, test harness skeleton, README outline |
 | 1:30–1:45 | Integration | Wire B's `llm.py` into A's `/analyze-ticket` | help wire | run `/health` + one manual test |
 | 1:45–2:45 | Sprint 2 | Add 400/422/500 handling, request timeout wrapper | Tune prompt against all 10 sample cases | Wire safety filter + fallback into pipeline; build full test runner |
 | 2:45–3:15 | Test pass | Fix crashes/edge cases found by C | Fix reasoning mismatches | Run all 10 samples + injection/OTP/Bangla edge cases, log failures |
@@ -145,18 +145,18 @@ def find_candidates(complaint: str, history: list[dict]) -> list[dict]:
 
 This step also protects you if the LLM API is slow/down — `find_candidates` alone can drive the deterministic fallback (Section 8).
 
-**Step 2 — Call OpenAI with structured outputs.** Use the `response_format: {"type": "json_schema", ...}` (or function-calling/tool-call) feature so the model is constrained to your exact schema and enum values at the API level — this is your strongest defense against schema violations. Check current OpenAI docs for the exact parameter name/model id available to your account; a small, fast, cost-efficient chat model is sufficient for this task (no need for the largest/most expensive option).
+**Step 2 — Call Gemini with structured outputs.** Use the `response_format: {"type": "json_schema", ...}` (or function-calling/tool-call) feature so the model is constrained to your exact schema and enum values at the API level — this is your strongest defense against schema violations. Check current Gemini docs for the exact parameter name/model id available to your account; a small, fast, cost-efficient chat model is sufficient for this task (no need for the largest/most expensive option).
 
 ```python
 # llm.py (sketch)
 import json, os
-from openai import OpenAI
+from Gemini import Gemini
 
-client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
+client = Gemini(api_key=os.environ["Gemini_API_KEY"])
 
 def analyze_with_llm(ticket: dict, candidates: list[dict]) -> dict:
     response = client.chat.completions.create(
-        model=os.environ.get("MODEL_NAME", "gpt-4o-mini"),  # verify against your account's available models
+        model=os.environ.get("MODEL_NAME", "gemini-2.5-flash"),  # verify against your account's available models
         messages=[
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": build_user_prompt(ticket, candidates)},
@@ -326,7 +326,7 @@ Tune the patterns during Sprint 2 by deliberately trying to break your own servi
 
 ## 9. Fallback Layer (`fallback.py`) — never crash, never time out silently
 
-If the OpenAI call raises, times out, or returns invalid JSON, **do not 500 the request** — return a safe degraded response so the judge harness sees a valid 200 instead of a failure:
+If the Gemini call raises, times out, or returns invalid JSON, **do not 500 the request** — return a safe degraded response so the judge harness sees a valid 200 instead of a failure:
 
 ```python
 def safe_fallback(ticket_id: str) -> dict:
@@ -403,7 +403,7 @@ Also hand-test these edge cases before submitting:
 **Fastest path: Render or Railway.**
 1. Push repo to GitHub.
 2. Connect repo on Render/Railway, set build command (`pip install -r requirements.txt`), start command (`uvicorn app.main:app --host 0.0.0.0 --port $PORT`).
-3. Set `OPENAI_API_KEY` and `MODEL_NAME` as environment variables on the platform — never in the repo.
+3. Set `Gemini_API_KEY` and `MODEL_NAME` as environment variables on the platform — never in the repo.
 4. Confirm `/health` and `/analyze-ticket` are reachable from outside before submitting.
 
 **Docker fallback** (`Dockerfile`):
@@ -425,8 +425,8 @@ Keep the image lean (no GPU, no baked-in model weights) — well under the 1 GB 
 ## 13. README.md — required sections
 
 - Setup & run command (local + Docker).
-- Tech stack (FastAPI, Pydantic, OpenAI).
-- **MODELS section**: which OpenAI model, where it runs (OpenAI's API), why chosen (cost/latency tradeoff).
+- Tech stack (FastAPI, Pydantic, Gemini).
+- **MODELS section**: which Gemini model, where it runs (Gemini's API), why chosen (cost/latency tradeoff).
 - AI approach: hybrid rule-based matcher + LLM structured reasoning + rule-based safety filter.
 - Safety logic: explain the three guardrails and the fallback layer.
 - Assumptions & known limitations (e.g. heuristic matcher may misrank ambiguous multi-candidate cases; no persistent storage; synthetic data only).
