@@ -47,13 +47,29 @@ def run_tests():
     
     for case in cases:
         print(f"Testing {case['id']}: {case['label']}")
+        payload = case["input"]
+        expected = case["expected_output"]
+        
         try:
-            resp = requests.post(API_URL, json=case["input"], timeout=30)
+            resp = requests.post(API_URL, json=payload, timeout=30)
             if resp.status_code == 200:
-                print("  [SUCCESS] 200 OK - Valid Schema output")
-                success_count += 1
-                # You can uncomment to see the payload
-                # print("  Response:", json.dumps(resp.json(), indent=2))
+                result = resp.json()
+                
+                # Diff core fields
+                diffs = []
+                for field in ["relevant_transaction_id", "evidence_verdict", "case_type", "department", "human_review_required"]:
+                    res_val = result.get(field)
+                    exp_val = expected.get(field)
+                    if res_val != exp_val:
+                        diffs.append(f"{field}: expected {exp_val}, got {res_val}")
+                        
+                if diffs:
+                    print("  [FAILED] Mismatches found:")
+                    for d in diffs:
+                        print(f"    - {d}")
+                else:
+                    print("  [SUCCESS] 200 OK - Core fields matched successfully.")
+                    success_count += 1
             else:
                 print(f"  [ERROR] {resp.status_code}")
                 print(f"  Details: {resp.text}")
@@ -63,7 +79,10 @@ def run_tests():
             print(f"  [ERROR] Exception: {e}")
         print("-" * 50)
         
-    print(f"Finished testing. Passed Schema validation for {success_count}/{len(cases)} cases.")
+    print(f"Finished testing. Passed Schema & Core validation for {success_count}/{len(cases)} cases.")
+    
+    if success_count < len(cases):
+        sys.exit(1)
 
 if __name__ == "__main__":
     run_tests()
