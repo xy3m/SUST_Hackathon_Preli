@@ -12,6 +12,7 @@ from .fallback import safe_fallback
 from .safety import enforce_safety
 from .matcher import find_candidates
 from .llm import analyze_with_llm
+from .normalize import normalize_response
 
 app = FastAPI(title="QueueStorm Investigator")
 executor = ThreadPoolExecutor(max_workers=10)
@@ -39,9 +40,9 @@ def health():
 @app.post("/analyze-ticket", response_model=TicketResponse)
 async def analyze_ticket(payload: TicketRequest):
     ticket_id = payload.ticket_id
+    history = [txn.model_dump() for txn in payload.transaction_history] if payload.transaction_history else []
     try:
         # Step 1: Pre-filter candidates
-        history = [txn.model_dump() for txn in payload.transaction_history] if payload.transaction_history else []
         candidates = find_candidates(payload.complaint, history)
         
         # Step 2: Call LLM with a strict 20-second timeout
@@ -53,15 +54,20 @@ async def analyze_ticket(payload: TicketRequest):
         
         # Always echo the ticket_id exactly as given, never trust LLM here
         raw["ticket_id"] = ticket_id
-        
+
+        # Step 3: Enforce deterministic invariants on the LLM output
+        # (routing, verdict, escalation, confidence)
+        raw = normalize_response(raw, history)
+
     except Exception as e:
         print(f"Exception during LLM call: {e}")
+        # The fallback is already deterministic and escalates to a human.
         raw = safe_fallback(ticket_id)
 
-    # Step 3: Enforce safety rules
+    # Step 4: Enforce safety rules (applies to both LLM and fallback paths)
     raw, violations = enforce_safety(raw)
 
-    # Step 4: Validate against Pydantic model
+    # Step 5: Validate against Pydantic model
     try:
         # Returning standard Pydantic model forces schema validation
         return TicketResponse(**raw)

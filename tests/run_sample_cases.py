@@ -83,8 +83,8 @@ def run_tests():
         
         # Avoid Gemini Free Tier rate limit (5 requests per minute for 2.5-flash)
         if idx < len(cases) - 1:
-            print("  Sleeping for 15s to respect rate limits...")
-            time.sleep(15)
+            print("  Sleeping for 20s to respect rate limits...")
+            time.sleep(20)
         
     print(f"Finished testing. Passed Schema & Core validation for {success_count}/{len(cases)} cases.")
     
