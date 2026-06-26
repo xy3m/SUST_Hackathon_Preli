@@ -1,71 +1,63 @@
 import re
+from datetime import datetime
 
 def find_candidates(complaint: str, history: list[dict]) -> list[dict]:
-    """
-    Light heuristic scoring — not the final answer, just a hint for the LLM.
-    Score by: amount mentioned in complaint matches transaction.amount (±5%),
-    type keywords ("sent"/"transfer", "bill"/"payment", "deposit"/"cash_in"),
-    and recency (closer timestamp = higher score).
-    Return the top 3 candidates with their scores attached.
-    """
     if not history:
         return []
 
-    # Extract potential amounts from the complaint using a simple regex
-    # Matches numbers like 100, 100.50, 1,000, etc.
-    amount_matches = re.findall(r'\b\d+(?:,\d{3})*(?:\.\d+)?\b', complaint)
-    amounts_in_complaint = []
-    for match in amount_matches:
-        try:
-            amounts_in_complaint.append(float(match.replace(',', '')))
-        except ValueError:
-            pass
+    # 1. Extract potential amounts from the complaint
+    # Match numbers that could be amounts (e.g., 5000, 1200.50)
+    amount_matches = re.findall(r'\b\d+(?:\.\d+)?\b', complaint)
+    complaint_amounts = [float(match) for match in amount_matches]
 
-    # Keyword lists mapped to transaction types
-    type_keywords = {
-        "transfer": ["sent", "transfer", "send", "give", "paid", "wrong number"],
-        "payment": ["bill", "payment", "merchant", "pay", "bought", "shop"],
-        "cash_in": ["deposit", "cash in", "cash-in", "add money", "recharge"],
-        "cash_out": ["withdraw", "cash out", "cash-out", "agent"],
-        "settlement": ["settlement", "settle", "batch"],
-        "refund": ["refund", "return", "back"]
-    }
-    
+    # 2. Extract keywords for transaction types
     complaint_lower = complaint.lower()
+    type_keywords = {
+        "transfer": ["sent", "send", "transfer", "wrong number"],
+        "payment": ["bill", "pay", "payment", "recharge", "merchant"],
+        "cash_in": ["deposit", "cash in", "cash_in", "agent"],
+        "cash_out": ["withdraw", "cash out", "cash_out"],
+        "settlement": ["settlement", "sales", "settled"],
+        "refund": ["refund", "returned"]
+    }
+
+    scored_history = []
     
-    scored_candidates = []
-    for i, tx in enumerate(history):
+    for idx, txn in enumerate(history):
         score = 0.0
         
-        # 1. Amount match (highest weight)
-        tx_amount = float(tx.get('amount', 0.0))
-        for amt in amounts_in_complaint:
-            # Check within ±5%
-            if tx_amount > 0 and abs(amt - tx_amount) / tx_amount <= 0.05:
-                score += 5.0
-                break # Only score once for amount
-
-        # 2. Type keyword match
-        tx_type = tx.get('type', '')
-        if tx_type in type_keywords:
-            for kw in type_keywords[tx_type]:
-                if kw in complaint_lower:
-                    score += 2.0
-                    break
-
-        # 3. Recency
-        # Assuming the history list is ordered newest first or similar, 
-        # we give a small boost to earlier items in the list.
-        recency_score = max(0, 1.0 - (i * 0.2))
-        score += recency_score
+        # A. Amount matching (±5%)
+        txn_amount = float(txn.get("amount", 0.0))
+        for camt in complaint_amounts:
+            if camt > 0 and abs(txn_amount - camt) / camt <= 0.05:
+                score += 50.0  # Strong signal
+                break
+                
+        # B. Type matching based on keywords
+        txn_type = txn.get("type", "")
+        keywords = type_keywords.get(txn_type, [])
+        if any(kw in complaint_lower for kw in keywords):
+            score += 20.0
+            
+        # C. Recency matching
+        # More recent transactions get a slight boost. We'll use the index since history 
+        # is typically ordered most recent first, or we can parse the timestamp.
+        try:
+            # Add a small score based on recency to break ties (assuming standard ISO format)
+            # We'll just give a small point boost, ensuring it doesn't override amount/type
+            dt = datetime.fromisoformat(txn.get("timestamp", "").replace("Z", "+00:00"))
+            score += dt.timestamp() / 1e10 # Tiny boost based on unix time
+        except Exception:
+            pass
+            
+        # D. Base order priority (if timestamps fail)
+        score -= (idx * 0.1) 
         
-        # Attach score
-        tx_with_score = dict(tx) # shallow copy
-        tx_with_score['_heuristic_score'] = score
-        scored_candidates.append(tx_with_score)
+        # Store scored candidate
+        txn_copy = dict(txn)
+        txn_copy["_heuristic_score"] = score
+        scored_history.append(txn_copy)
         
-    # Sort by score descending
-    scored_candidates.sort(key=lambda x: x.get('_heuristic_score', 0), reverse=True)
-    
-    # Return top 3
-    return scored_candidates[:3]
+    # Sort by score descending and return top 3
+    scored_history.sort(key=lambda x: x["_heuristic_score"], reverse=True)
+    return scored_history[:3]

@@ -109,7 +109,7 @@ exactly."""
 
 ANALYZE_TICKET_JSON_SCHEMA = {
     "name": "ticket_analysis",
-    "strict": True,
+    "strict": False,
     "schema": {
         "type": "object",
         "properties": {
@@ -158,9 +158,7 @@ ANALYZE_TICKET_JSON_SCHEMA = {
             "agent_summary",
             "recommended_next_action",
             "customer_reply",
-            "human_review_required",
-            "confidence",
-            "reason_codes"
+            "human_review_required"
         ],
         "additionalProperties": False
     }
