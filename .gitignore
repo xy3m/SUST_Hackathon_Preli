@@ -8,3 +8,5 @@ test_results.txt
 results_utf8.txt
 run_and_log.py
 full_test_log.txt
+test_run_output.html
+generate_html.py
